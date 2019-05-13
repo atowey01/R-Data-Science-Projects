@@ -5,7 +5,7 @@ date: "27 March 2019"
 output: html_document
 ---
 
-#Project Objective
+#Analysis Objective
 The objective of this analysis is to analyse transaction data to identify what characteristics are most closely related to a transaction being fraudulent or not.
 
 #Data Overview
@@ -309,7 +309,7 @@ These findings from the exploratory data analysis were later used to cross check
 Following the exploratory data analysis phase, different models were evaluated to identify the most appropriate for this analysis. The models selected were:
 
 * Decision Tree
-* Naïve Bayes
+* NaÃ¯ve Bayes
 * Random Forest
 
 Different variations of the models were tested to find the best model through altering the parameters of the models. The data was split into 2 with 80% of the data put into a training set and 20% put into a test set. The model was trained on the training set and tested on the test set to ensure the models generalised well to unseen data. Smote was only used on the training set so the training set was balanced but the test set still reflected the class imbalance.
