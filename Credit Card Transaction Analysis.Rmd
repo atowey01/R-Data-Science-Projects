@@ -1,0 +1,798 @@
+---
+title: "Credit Card Transactions Analysis"
+author: "Aisling Towey"
+date: "27 March 2019"
+output: html_document
+---
+
+#Analysis Objective
+The objective of this analysis is to explore transaction data to identify what characteristics are most closely related to a transaction being fraudulent or not.
+
+#Data Overview
+The data consists of 10 variables and 594643 observations each representing a transaction and can be found at https://www.kaggle.com/ntnu-testimon/banksim1#bs140513_032310.csv. See below for an overview of the data and variables. The outcome variable labelled 'fraud' is a binary variable with '1' representing a fraudulent transaction and '0' representing a non-fraudulent transaction. The remaining variables provide information on each transaction and are a mix of factor, integer and numeric variables. These variables are labelled step, customer, age, gender, zipcodeOri, merchant, zipMerchant, category and amount. All variables are further discussed in the exploratory data analysis section.
+
+```{r warning = TRUE, echo = FALSE, results='hide', include=FALSE}
+
+##Load packages 
+r = getOption("repos")
+r["CRAN"] = "http://cran.us.r-project.org"
+options(repos = r)
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(ggplot2)) install.packages("ggplot2")
+if(!require(corrplot)) install.packages("corrplot")
+if(!require(dplyr)) install.packages("dplyr")
+if(!require(caret)) install.packages("caret")
+if(!require(ranger)) install.packages("ranger")
+if(!require(xgboost)) install.packages("xgboost")
+if(!require(skimr)) install.packages("skimr")
+if(!require(gridExtra)) install.packages("gridExtra")
+if(!require(grid)) install.packages("grid")
+if(!require(grid)) install.packages("Hmisc")
+if(!require(funModeling)) install.packages("funModeling")
+if(!require(DMwR)) install.packages("DMwR")
+if(!require(MASS)) install.packages("MASS")
+if(!require(caTools)) install.packages("caTools")
+if(!require(data.table)) install.packages("data.table")
+if(!require(mltools)) install.packages("mltools")
+if(!require(rpart)) install.packages("rpart")
+if(!require(rpart.plot)) install.packages("rpart.plot")
+if(!require(pROC)) install.packages("pROC")
+if(!require(pROC)) install.packages("knitr")
+library(gridExtra)
+library(grid)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(caret)
+library(ranger)
+library(xgboost)
+library(skimr)
+library(Hmisc)
+library(funModeling)
+library(DMwR)
+library(MASS)
+library(caTools)
+library(data.table)
+library(mltools)
+library(pROC)
+library(knitr)
+```
+
+```{r echo = FALSE, results='hide'}
+#read in the data, change any string variables to factors
+transactions <- read.csv("A2 data.csv", stringsAsFactors =TRUE)
+```
+
+```{r echo = FALSE}
+#get overview of the data
+glimpse(transactions)
+```
+
+
+###Stating and Refining the Question
+The initial step taken in the analysis was to identify the question of the analysis and the type of analysis that was required.  As stated above the objective of this project is to carry out analysis on transaction data to identify what characteristics are most closely related to a transaction being fraudulent or not. The question therefore is a mixture of exploratory and prediction. The question is exploratory as the data can be analysed to find trends and relationships between variables that are commonly associated with fraudulent or non-fraudulent transactions.  Predictions can also be made on whether a transaction will be fraudulent or not based on the other variables in the dataset. The best model can then be explored to identify which variables are most important to the model. The variables most important to the model are likely to have characteristics that are related to fraudulent or non-fraudulent transactions.  As the outcome variable is binary it is evident that this is a classification problem.
+
+###Exploratory Data Analysis
+Once the question is clear, the next step of an analysis is to carry out exploratory data analysis. Basic analysis was first carried out which involved getting an overview of the structure, dimensions and head of the dataset. Before looking at the variables in detail, other basic aspects were explored including checking for missing values, identifying duplicates, checking for multicollinearity between numeric variables and identifying outliers. Fortunately, none of these aspects were identified in the data so no further action was required.
+
+
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+
+############### Exploratory data anlaysis section ########################
+
+##complete basic exploratory data analysis
+str(transactions)
+dim(transactions)
+head(transactions)
+
+summary(transactions)
+skim(transactions)
+describe(transactions)
+```
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#check for missing values, duplicated and multicolinearity
+
+#check for missing values
+sum(is.na(transactions))
+
+#no missing values
+
+
+#check for duplicates
+trans_dups <- transactions %>% 
+  duplicated()
+
+anyDuplicated(transactions)
+unique(transactions)
+
+#no duplicates
+
+
+#check correlation between numeric variables
+corMatrix <- cor(transactions[,c(1,7)])
+#summarize the correlation matrix
+print(corMatrix)
+#find attributes that are highly corrected
+highCor <- findCorrelation(corMatrix, cutoff=0.8)
+# print indexes of highly correlated attributes
+print(highCor)
+
+#no correlation found
+```
+
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#explore split of factor variables
+freq(transactions)
+
+#things to note from output:
+#2 merchants make up most of the transactions (84.95%)
+#gender is nearly all male and female
+#transportation makes up most of the transactions (84.94%)
+#the dataset is imbalanced
+```
+
+```{r echo = FALSE, results='hide'}
+#recode the response variable fraud as "yes" and "no" and change to a factor
+transactions$fraud <- recode_factor(transactions$fraud, '0' = "no", '1' = "yes")
+transactions$fraud <- as.factor(transactions$fraud)
+```
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#check split of response variable
+prop.table(table(transactions$fraud))
+
+#the dataset is very imbalanced so will have to deal with this in models
+```
+
+The first variable to be explored was the response variable 'fraud'. The variable was recoded so that "yes" was equal to a fraudulent transaction and "no" was equal to a non-fraudulent transaction. The variable was also changed to a factor variable. It was found that there was a large imbalance in the response variable with most transactions proving to be non-fraudulent as shown in figure 1. To deal with this imbalance, the smote function in R was used. Smote up samples some of the non-fraudulent transactions in the dataset and down samples the non-fraudulent transactions to balance the dataset. Models can then be efficiently used on the dataset to predict fraud.
+
+```{r echo = FALSE, fig.align="center", fig.cap="Bar chart showing the class imbalance of the data", out.width="55%", out.height="55%"}
+
+fraud <- transactions %>% 
+  group_by(Fraud = transactions$fraud) %>% 
+  summarise(Count = n())
+
+#plot split of response variable
+ggplot(fraud, aes(fraud$Fraud, Count, fill = Fraud))+
+  ggtitle("Distribution of Fraud")+
+  theme(plot.title = element_text(hjust = 0.5))+
+          geom_bar(stat = "identity") +
+  xlab("Fraud")+
+  ylab("Count")+
+  geom_text(aes(label = Count), size = 4, hjust = 0.5, vjust = 1)+
+  scale_fill_manual(values = c("limegreen", "red"))
+```
+
+
+```{r echo = FALSE, results='hide'}
+#remove zero variance columns and customer column as it is not important to the models
+transactions <- transactions %>%
+  dplyr::select(-c(zipcodeOri, zipMerchant, customer))
+
+#check the columns have been removed
+head(transactions)
+dim(transactions)
+```
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#explore amount variable
+#create histogram of amount variable
+ggplot(transactions, aes(x = amount))+
+  geom_histogram()
+
+#create boxplot of amount variable
+boxplot(transactions$amount)$out
+
+#check statistics of amount variables
+summary(transactions$amount)
+```
+
+```{r echo = FALSE, results='hide'}
+#check for transactions that are 0 in amount
+zero_tran <- transactions %>% 
+  filter(amount == 0)
+
+#check how many rows exist
+nrow(zero_tran)
+
+#check if these transactions were fraud
+zero_tran$fraud
+
+#remove these transactions
+transactions <- transactions %>%
+  filter(amount != 0)
+
+#ensure they were removed
+dim(transactions)
+```
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#check for transactions that are small in amount
+small_tran <- transactions %>% 
+  filter(amount < 0.2)
+
+#check how many rows exist
+nrow(small_tran)
+
+#check if these transactions were fraud
+small_tran$fraud
+
+#most are not fraud but some are and still need to be able to identify these frauds so cannot remove
+```
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#check for transactions that are large
+large_tran <- transactions %>% 
+  filter(amount >2150)
+
+#check how many rows exist
+nrow(large_tran)
+
+#check if these transactions were fraud
+large_tran$fraud
+
+#note that any transaction greater than 2200 is fraud (319 observations)
+```
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#explore the variables
+
+#explore gender variable
+table(transactions$gender,transactions$fraud)
+
+#explore category variable
+table(transactions$category,transactions$fraud)
+#note transportation is the largest category but has 0 fraud
+#contents and food also have no fraud
+#fraud evident in leisure, sports & toys and travel
+
+ #explore age variable
+table(transactions$age,transactions$fraud)
+
+#explore merchant variable
+table(transactions$merchant,transactions$fraud)
+#note the top 2 merchant have 0 fraud
+#various merchants have high proprtions of fraud
+
+
+#explore step variable
+table(transactions$step,transactions$fraud)
+#note a new step appears to be created after each 40 fradulent transactions
+
+```
+
+3 variables were removed from the data which were zipcodeOri, zipMerchant and customer. The first two variables had zero variance meaning there was only one level in the variable. Customer was removed as it was found to have very little impact on the whether a transaction was fraudulent or not and there were a lot of customers making it difficult to find useful insights. This left 6 variables in the data excluding the response variable.
+
+Each of the 6 remaining predictor variables were then further inspected to see if any interesting insights could be found. The aim was to identify characteristics in the variables that were associated with fraudulent or non-fraudulent transactions simply be exploring the data. All predictor variables were explored but it was found that the age, gender and step variables had no characteristics that indicated whether a fraud was fraudulent or not. The variables found to be of most interest were amount, category and merchant. The findings from each are explained below.
+
+* Category - 84.94% of all observations were in the transport category and none of these transactions were identified as fraudulent. In addition to this no transactions in the food and contents categories were found to be fraudulent. A large proportion of fraudulent transactions were found in leisure (95%), travel (79%) and sports & toys (50%) as illustrated in figure 2. Transactions in the transport, food and contents categories have all been removed in figure 2.
+
+
+```{r echo = FALSE, cache = TRUE, fig.align="center", fig.cap="Plot showing the proportion of fraudulent vs non fraudlent transactions in each category", out.width="70%", out.height="70%"}
+#create a plot to show fraud by category (first subset the data)
+category_plot <- transactions %>% 
+  dplyr::filter(category %nin% c("'es_transportation'", "'es_contents'", "'es_food'"))
+
+ggplot(category_plot, aes(x = category, fill = fraud))+
+  geom_bar()+
+  ggtitle("Fraudulent vs Non Fraudlent Transactions by Category")+
+theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_fill_manual(values = c("limegreen", "red3"))
+
+```
+
+* Amount - 52 transactions were found to have an amount of 0 and none of these transactions were fraudulent meaning they could be removed from the data. It was found that any transaction with an amount greater than 2150 equated to fraud. There were 320 transactions with an amount over 2150 and all of these transactions were in the travel category. This finding is illustrated in figure 3.
+
+```{r echo = FALSE, fig.align="center", fig.cap="Plot highlighting all transactions greater than an amount of 2150 are fraudulent and are in the transport category", cache = TRUE, out.width="70%", out.height="70%"}
+
+#create a plot showing the distribution of amount across categories
+#note that all transactions greater than 2150 are fraudlent and are in the travel category
+ggplot(transactions, aes(x = amount, y = category, color = fraud)) +
+  geom_point() +
+  ggtitle('Distribution of Amount by Category') +
+  scale_colour_manual(values=c(no = 'limegreen',yes = 'red3'))+
+  theme(plot.title = element_text(hjust = 0.5))+
+  geom_vline(xintercept = 2150)
+
+```
+
+* Merchant - Finally, it was found that 84.95% of transactions were carried out by 2 merchants. None of these transactions were identified as fraudulent. Therefore fraudulent transactions occurred with merchants with less transactions.
+
+These findings from the exploratory data analysis were later used to cross check with the results of the models.
+
+###Models
+Following the exploratory data analysis phase, different models were evaluated to identify the most appropriate for this analysis. The models selected were:
+
+* Decision Tree
+* Naïve Bayes
+* Random Forest
+
+Different variations of the models were tested to find the best model through altering the parameters of the models. The data was split into 2 with 80% of the data put into a training set and 20% put into a test set. The model was trained on the training set and tested on the test set to ensure the models generalised well to unseen data. Smote was only used on the training set so the training set was balanced but the test set still reflected the class imbalance.
+
+The metrics used to select the best model were sensitivity, specificity and area under the curve (AUC) as these are more appropriate metrics than accuracy when dealing with an imbalanced dataset. Sensitivity (also called the true positive rate) is the proportion of fraudulent transactions that were correctly identified as fraudulent. Specificity (also called the true negative rate) is the proportion of non-fraudulent transactions that were correctly identified as non-fraudulent. AUC represents the area under the receiver operating characteristic (ROC) curve. ROC curves provide a graphical way of showing the trade off between sensitivity and specificity. The closer all 3 of these metrics are to 1, the better the model. 
+
+
+```{r echo = FALSE, results='hide'}
+################ Model preparation section ##################
+
+#create training and testing data, use 80:20 split
+in_train <- createDataPartition(transactions$fraud, p = 0.8, list = FALSE) 
+transactions_train <- transactions[in_train, ]
+transactions_test <- transactions[-in_train, ]
+
+#check the structure of the train and test set so ensure the split has occurred
+dim(transactions)
+dim(transactions_train)
+dim(transactions_test)
+
+# to investigate whether the representative sets are taken
+prop.table(table(transactions$fraud))
+prop.table(table(transactions_train$fraud))
+prop.table(table(transactions_test$fraud))
+
+```
+
+```{r echo = FALSE, results='hide', cache = TRUE}
+#balance the training set using smote
+set.seed(123)
+transactions_train_bal <- SMOTE(fraud ~ ., data = transactions_train, perc.over = 500, perc.under=130)
+
+#check the training set is now balanced
+table(transactions_train_bal$fraud)
+prop.table(table(transactions_train_bal$fraud))
+```
+
+```{r echo = FALSE, results='hide'}
+#separate predictor variables from the response variable (`fraud`)
+transactions_x <- transactions_train_bal %>% 
+  dplyr::select(-fraud) 
+transactions_y <- transactions_train_bal %>% 
+  dplyr::select(fraud) %>% 
+  pull() 
+
+#double check whether the correct variables were selected
+head(transactions_x)
+head(transactions_y)
+prop.table(table(transactions_y))
+```
+
+```{r echo = FALSE, results='hide'}
+# create train/test indexes which will be used in 5-Fold CV
+myFolds <- createFolds(transactions_y, k = 5)
+# inspect myFold indexes
+myFolds
+
+#check the first fold
+prop.table(table(transactions_y[myFolds$Fold1]))
+```
+
+```{r echo = FALSE, results='hide'}
+# create unique configuration which will be shared across all classification models 
+ctrl <- trainControl(
+  method = "cv",  
+  number = 5, # instruct that it is 5 fold-cv
+  index = myFolds, # folds' indexes
+  summaryFunction = twoClassSummary, # use AUC metric to rank the models
+  classProbs = TRUE, 
+  verboseIter = FALSE, 
+  savePredictions = TRUE, 
+  preProcOptions = list(thresh = 0.8)
+)
+```
+
+
+```{r echo = FALSE, results='hide', cache= TRUE, include=FALSE}
+############ Models section #################
+
+############ Decision tree default model ###############
+
+set.seed(123)
+
+#train the model
+model_dt_default <- train(
+  x = transactions_x, # predictors dataset
+  y = transactions_y, # response variable
+  method = "rpart", # ML algorithm
+  trControl = ctrl, # training configuration
+  preProcess = c("zv", "center", "scale") 
+)
+
+#model summary
+model_dt_default
+
+#the optimal hyperparameter value(s)
+model_dt_default$bestTune
+
+#create plot of the decision tree
+prp(model_dt_default$finalModel, type = 5)
+#from the plot we can see the model focuses on merchant as the most important variable
+
+#inspect the variable importance, in the default DT model
+plot(varImp(model_dt_default))
+#we can see merchant, category and amount are most important
+#the other variables could be removed
+```
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#use the test set to make predictions using the dt default model
+dt_default_predictions <- predict(model_dt_default, newdata = dplyr::select(transactions_test, -fraud))
+
+#create a confusion matrix
+confusionMatrix(dt_default_predictions, transactions_test$fraud, positive="yes") 
+
+#return predicted class probabilities
+dt_default_predict <- predict(model_dt_default, newdata = dplyr::select(transactions_test, -fraud), type="prob") 
+
+dt_default_predict
+summary(dt_default_predict)
+
+#calculate AUC and plot ROC Curve
+caTools::colAUC(dt_default_predict, transactions_test$fraud, plotROC = TRUE)
+```
+
+
+```{r echo = FALSE, results='hide', cache= TRUE, include=FALSE}
+############ Decision tree auto model ###############
+
+set.seed(123)
+
+#train the model
+model_dt_auto <- train(
+  x = transactions_x, # predictors dataset
+  y = transactions_y, # response variable
+  method = "rpart", # ML algorithm 
+  trControl = ctrl, # training configuration
+  tuneLength = 20, # caret's random selection of tuning parametres
+  preProcess = c("zv", "center", "scale") 
+)
+
+#model summary
+model_dt_auto
+
+#the optimal hyperparameter value(s)
+model_dt_auto$bestTune
+
+#create plot of the decision tree
+prp(model_dt_auto$finalModel, type = 5)
+
+#inspect the variable importance, in the default DT model
+plot(varImp(model_dt_auto))
+#we can see merchant, category and amount are most important
+#the other variables could be removed
+```
+
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#use the test set to make predictions using the dt auto model
+dt_auto_predictions <- predict(model_dt_auto, newdata = dplyr::select(transactions_test, -fraud))
+
+#create a confusion matrix
+confusionMatrix(dt_auto_predictions, transactions_test$fraud, positive="yes") 
+
+#return predicted class probabilities
+dt_auto_predict <- predict(model_dt_auto, newdata = dplyr::select(transactions_test, -fraud), type="prob") 
+
+dt_auto_predict
+summary(dt_auto_predict)
+
+#calculate AUC and plot ROC Curve
+caTools::colAUC(dt_auto_predict, transactions_test$fraud, plotROC = TRUE)
+```
+
+
+```{r echo = FALSE, results='hide', cache= TRUE, include=FALSE}
+############## Naive Bayes default model ################
+
+set.seed(123)
+
+#train the model
+model_nb_default <- train(
+  x = transactions_x, # predictors dataset
+  y = transactions_y, # response variable
+  method = "naive_bayes", # ML algorithm 
+  trControl = ctrl, # training configuration
+  preProcess = c("zv", "center", "scale")
+)
+
+#model summary
+model_nb_default
+
+#the optimal hyperparameter value(s)
+model_nb_default$bestTune
+
+# inspect the impact of different hyperparameter settings on the predictive perforormances of the model
+plot(model_nb_default)
+
+# inspect the variable importance, in the default NB model
+plot(varImp(model_nb_default))
+```
+
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+#use the test set to make predictions using the nb default model
+nb_default_predictions <- predict(model_nb_default, newdata = dplyr::select(transactions_test, -fraud))
+
+#create a confusion matrix
+confusionMatrix(nb_default_predictions , transactions_test$fraud,positive="yes") 
+
+#return predicted class probabilities
+nb_default_predict <- predict(model_nb_default, newdata = dplyr::select(transactions_test, -fraud), type="prob") 
+
+nb_default_predict 
+summary(nb_default_predict )
+
+#calculate AUC and plot ROC Curve
+caTools::colAUC(nb_default_predict , transactions_test$fraud, plotROC = TRUE)
+```
+
+
+```{r echo = FALSE, results='hide', cache= TRUE, include=FALSE}
+
+############## Naive Bayes manual model ################
+
+set.seed(123)
+
+# because by default CARET does not use laplacian correction (i.e laplace=0), 
+#let's manually set up hyperparameters grid to see if we can improve the results
+#train the model
+model_nb_manual <- train(
+  x = transactions_x, # predictors dataset
+  y = transactions_y, # response variable
+  method = "naive_bayes", # ML algorithm
+  trControl = ctrl, # training configuration
+  tuneGrid = expand.grid(
+    usekernel = c(TRUE, FALSE),
+    laplace = 0:5,
+    adjust = 1:3
+  ),
+  preProcess = c("zv", "center", "scale")
+)
+
+#model summary
+model_nb_manual
+
+#the optimal hyperparameter value(s)
+model_nb_manual$bestTune
+
+#inspect the variable importance of the `model_nb_manual`
+plot(varImp(model_nb_manual))
+```
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+
+#use the test set to make predictions using the nb default model
+nb_manual_predictions <- predict(model_nb_manual, newdata = dplyr::select(transactions_test, -fraud))
+
+#create a confusion matrix
+confusionMatrix(nb_manual_predictions , transactions_test$fraud,positive="yes")
+
+#return predicted class probabilities
+nb_manual_predict <- predict(model_nb_manual, newdata = dplyr::select(transactions_test, -fraud), type="prob") 
+
+nb_manual_predict
+summary(nb_manual_predict)
+
+#calculate AUC and plot ROC Curve
+caTools::colAUC(nb_manual_predict, transactions_test$fraud, plotROC = TRUE)
+ 
+```
+
+
+```{r echo = FALSE, results='hide', cache= TRUE, include=FALSE}
+
+############ Random Forest default model ###############
+
+set.seed(123)
+
+#train the model
+model_ranger_default <- train(
+  x =transactions_x, # predictors dataset
+  y = transactions_y, # response variable
+  method = "ranger", # ML algorithm
+  trControl = ctrl, # training configuration
+  importance = "impurity", # this needs to be added only for `ranger` for identifying variable importance
+  preProcess = c("zv", "center", "scale") 
+)
+
+# model summary
+model_ranger_default
+
+#the optimal hyperparameter value(s)
+model_ranger_default$bestTune
+
+# inspect the variable importance, in the default ranger model
+plot(varImp(model_ranger_default))
+```
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+
+#use the test set to make predictions using the ranger default model
+ranger_default_predictions <- predict(model_ranger_default, newdata = dplyr::select(transactions_test, -fraud))
+
+#create a confusion matrix
+confusionMatrix(ranger_default_predictions, transactions_test$fraud,positive="yes")
+
+#return predicted class probabilities
+ranger_default_predict <- predict(model_ranger_default, newdata = dplyr::select(transactions_test, -fraud), type="prob") 
+
+ranger_default_predict
+summary(ranger_default_predict)
+
+#calculate AUC and plot ROC Curve
+caTools::colAUC(ranger_default_predict, transactions_test$fraud, plotROC = TRUE)
+ 
+```
+
+```{r echo = FALSE, results='hide', cache= TRUE, include=FALSE}
+
+############ Random Forest auto model ###############
+
+set.seed(123)
+
+#instead of randomly selecting  mtree values 
+#let's instruct CARET to randomly select 20 different mtree values, and select the one for which the model has the highest AUC score
+
+#train the model
+model_ranger_auto <- train(
+  x = transactions_x, # predictors dataset
+  y = transactions_y, # response variable
+  method = "ranger", # ML algorithm
+  trControl = ctrl, # training configuration
+  importance = "impurity", 
+  tuneLength = 20, # caret's random selection of tuning parametres
+  # tuneGrid = expand.grid()
+  preProcess = c("zv", "center", "scale")
+)
+
+#model summary
+model_ranger_auto
+
+#the optimal hyperparameter value(s)
+model_ranger_auto$bestTune
+
+#inspect the variable importance, in the auto ranger model
+plot(varImp(model_ranger_auto))
+```
+
+
+```{r echo = FALSE, eval=FALSE, results='hide'}
+
+#use the test set to make predictions using the ranger auto model
+ranger_auto_predictions <- predict(model_ranger_auto, newdata = dplyr::select(transactions_test, -fraud))
+
+#create a confusion matrix
+confusionMatrix(ranger_auto_predictions, transactions_test$fraud,positive="yes")
+
+#return predicted class probabilities
+ranger_auto_predict <- predict(model_ranger_auto, newdata = dplyr::select(transactions_test, -fraud), type="prob") 
+
+ranger_auto_predict
+summary(ranger_auto_predict)
+
+#calculate AUC and plot ROC Curve
+caTools::colAUC(ranger_auto_predict, transactions_test$fraud, plotROC = TRUE)
+ 
+```
+
+
+```{r echo = FALSE, results='hide', cache= TRUE, include=FALSE}
+
+############ Random Forest manual model ###############
+
+set.seed(123)
+
+#from the summary output, we can see that the model `model_ranger_auto` has the best performance
+#let's instruct CARET to investigate the models' performance for 3 <= mtree <= 5, 
+#and select the one for which the model has the highest AUC score
+
+#train the model
+model_ranger_manual <- train(
+  x = transactions_x, # predictors dataset
+  y = transactions_y, # response variable
+  method = "ranger", # ML algorithm
+  trControl = ctrl, # training configuration
+  importance = "impurity", 
+  tuneGrid = expand.grid(
+    mtry = 3:5,
+    splitrule = c("gini", "extratrees"),
+    min.node.size = 1
+  ),
+  preProcess = c("zv", "center", "scale") 
+)
+
+# model summary
+model_ranger_manual
+
+#the optimal hyperparameter value(s)
+model_ranger_manual$bestTune
+
+
+```
+
+```{r echo = FALSE, eval=TRUE, , include = FALSE, cache = TRUE, fig.align="center"}
+
+#use the test set to make predictions using the ranger manual model
+ranger_manual_predictions <- predict(model_ranger_manual, newdata = dplyr::select(transactions_test, -fraud))
+
+#create a confusion matrix
+confusionMatrix(ranger_manual_predictions, transactions_test$fraud,positive="yes")
+```
+
+
+```{r echo = FALSE, cache= TRUE, include = FALSE}
+###################### Model Comparison ####################
+
+all_resamples <- resamples(
+  list(
+    # decision trees
+    #dt_default = model_dt_default,
+    #dt_auto = model_dt_auto,
+    
+    # naive bayes
+    naive_bayes_default = model_nb_default,
+    naive_bayes = model_nb_manual,
+    
+    # random forests
+    random_forest_default = model_ranger_default,
+    random_forest_auto = model_ranger_auto,
+    random_forest_manual = model_ranger_manual
+  )
+)
+
+#table of results
+summary(all_resamples)
+
+#plot model comparison
+bwplot(all_resamples)
+```
+
+#Results
+Once models are built, the final steps of the process of analysis involve interpreting and communicating results. This section aims to provide an overview of the results of this analysis.
+
+The results of the models as illustrated in figure 4 show the random forest (manual) model achieves the highest ROC or AUC value of 0.997.The random forest model also achieves a sensitivity of 0.969 and a specificity of 0.985. Sensitivity was deemed more important than specificity in this analysis as it is important that all fraudulent transactions are identified even if some turn out to be non-fraudulent. Therefore eventhough other models had higher specificty levels, random forest manual was still deemed the best model. Fortunately, the model achieved both high sensitivity and specificity so this was not a huge issue. Decision trees are not included in this plot as random forest models combine multiple decision trees and produce improved results over decision trees. Figure 5 shows the ROC curve when the model was used on the test data set. It is evident the model generalised well to new data as it achieves high AUC, sensitivity and specificity values.
+
+```{r echo = FALSE, fig.align="center", fig.cap="A comparison of the models showing the random forest (manual) model as the best model", out.width="70%", out.height="70%"}
+#plot dotplot of model comparison
+dotplot(all_resamples, main = "Model Comparison")
+```
+
+```{r echo = FALSE, cache= TRUE, include = FALSE, eval= FALSE}
+#plot model comparison by each metric individually
+dotplot(all_resamples, metric = "ROC")
+dotplot(all_resamples, metric = "Sens")
+dotplot(all_resamples, metric = "Spec")
+```
+
+
+```{r echo = FALSE, cache = TRUE, fig.align="center", fig.cap="The ROC curve of the random forest model on the test data", out.width="70%", out.height="70%"}
+#return predicted class probabilities for ranger manual model
+ranger_manual_predict <- predict(model_ranger_manual, newdata = dplyr::select(transactions_test, -fraud), type="prob") 
+
+#ranger_manual_predict
+#summary(ranger_manual_predict)
+
+
+#calculate AUC and plot ROC Curve for the random forest manual model
+caTools::colAUC(ranger_manual_predict, transactions_test$fraud, plotROC = TRUE)
+
+```
+
+
+As the random forest model was deemed the best model, the importance of predictor variables to the model was then explored. Figure 6 shows that the amount, category and merchant variables were found to be the variables that the model relied most upon. This implies these variables contained characteristics that were related to whether a transaction was fraudulent or not. This supported the results of the exploratory data analysis in that amount, category and merchant all had interesting findings related to whether a transaction was fraudulent or not.
+
+```{r echo = FALSE, fig.align="center", fig.cap="Relative importance of the 6 predictor variables to the random forest model", out.width="70%", out.height="70%"}
+
+#inspect the variable importance, in the manual ranger model
+vimp_manual<- varImp(model_ranger_manual)
+plot(vimp_manual, ylab = "Variable", main = "Variable Importance of the Random Forest Model")
+```
+
+#Conclusion
+In conclusion this analysis found that the variables amount, category and merchant were the variables that had characteristics that were closely related to whether a transaction was fraudulent or not. This finding was supported by both the exploratory data analysis and the models. The exploratory data analysis found that: any transaction with an amount greater than 2150 was fraudulent and was in the travel category;  no transactions in the transportation, food or contents categories were found to be fraudulent; the categories leisure, travel and sports & toys were all found to have high proportions of fraudulent transactions; and all transactions from the top 2 merchants were found to be non-fraudulent meaning fraudulent transactions occurred with merchants that had less transactions.
+
+
