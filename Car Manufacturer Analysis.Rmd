@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ##Analysis Objective
-The objective of this analysis is to use car manufacturer's data to predict the time it takes to complete a check on each car before it is released from the manufacturer. The purpose of this prediction is to provide recommendations on how the time for each check can be reduced.
+The objective of this analysis is to use a car manufacturer's data to predict the time it takes to complete a check on each car before it is released from the manufacturer. The purpose of this prediction is to provide recommendations on how the time for each check can be reduced.
 
 ##Background
 The data provided consists of 4209 observations and 378 variables and can be found at https://www.kaggle.com/c/mercedes-benz-greener-manufacturing/data (only the train dataset was used). The outcome variable labelled 'y' contains the time it takes to complete a check of each car and the data also contains and ID variable for each check. The remaining variables are all binary variables excluding 8 rows containing factor variables. The names of these remaining variables are labeled from X0 to X385 giving no indication of the meaning of the variables.
